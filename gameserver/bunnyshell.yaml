@@ -1,0 +1,49 @@
+kind: Environment
+name: GameServer
+type: primary
+components:
+  -
+    kind: KubernetesManifest
+    name: my-app
+    runnerImage: 'alpine/k8s:1.22.15'
+    deploy:
+      -
+      - 'kustomize create --autodetect --recursive --labels=app.kubernetes.io/instance-my-app:bns,app.kubernetes.io/part-of:env-{{ env.unique }} --namespace {{ env.k8s.namespace }}'
+      - 'kustomize edit set image nginx={{ components.my-app-image.image }}'
+      - |
+        kustomize edit add patch --kind Deployment --name my-app --patch '[{"op": "add", "path": "/spec/template/spec/containers/0/env/-", "value": {"name": "ENV", "value": "bunnyshell"}}]'
+      - 'sed -i "s/my-app.mydomain.com/my-app-{{ env.base_domain }}/g" ingress.yaml'
+      - 'kubectl apply -k .'
+      - SERVICE_ENDPOINT="https://my-app-{{ env.base_domain }}/api"
+    destroy:
+      - 'kustomize create --autodetect --recursive --namespace {{ env.k8s.namespace }}'
+      - 'kubectl delete -k .'
+    start:
+      - 'kubectl scale --replicas=2 --namespace {{ env.k8s.namespace }} deployment/my-app'
+    stop:
+      - 'kubectl scale --replicas=0 --namespace {{ env.k8s.namespace }} deployment/my-app'
+    exportVariables:
+      - SERVICE_ENDPOINT
+apiVersion: "agones.dev/v1"
+kind: Fleet
+metadata:
+  name: simple-game-server
+spec:
+  replicas: 2
+  template:
+    spec:
+      ports:
+        - name: default
+          containerPort: 7654
+      template:
+        spec:
+          containers:
+            - name: simple-game-server
+              image: us-docker.pkg.dev/agones-images/examples/simple-game-server:0.16
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "20m"
+                limits:
+                  memory: "64Mi"
+                  cpu: "20m"
